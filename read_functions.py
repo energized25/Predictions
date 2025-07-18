@@ -431,3 +431,28 @@ def read_market_data(file_path="JAO_marketdata_export_08-05-2025.xlsx"):
         print(f"Fehler beim Einlesen der Datei: {e}")
         return None
 
+
+def imp_bal_prices(country):
+    # Extrahiere die Jahreszahlen aus den übergebenen Datumswerten
+    import pandas as pd
+
+
+    file_path = "DAT/PRC/"+ country+ "/reBAP_all.csv"
+
+
+    try:
+        df = pd.read_csv(file_path, delimiter=";")  # CSV-Datei einlesen
+        if df.empty:
+            print("The file is empty, no data to load.")
+        #df["Year"] = year  # Füge eine Spalte mit der Jahreszahl hinzu
+        df["Country"] = country  # Füge eine Spalte mit dem Land hinzu
+        
+    except pd.errors.EmptyDataError:
+        print("Error: No columns to parse from the file. The file might be empty or misformatted.") 
+
+
+    return df
+
+
+
+
