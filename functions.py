@@ -8,6 +8,7 @@ Created on Sat May  3 23:10:12 2025
 
 from read_functions import read_Wind_PV_data, read_X
 import pandas as pd
+import numpy as np
 import pytz
 from datetime import datetime, timedelta
 from parameters import get_season_filter_settings
@@ -126,6 +127,29 @@ def read_forecasts_hourly():
     PV_Wind_FC_copy = PV_Wind_FC_copy.set_index('timestamp_start')
     PV_Wind_FC_hourly = PV_Wind_FC_copy[~PV_Wind_FC_copy.index.floor('h').duplicated(keep='first')]
     return PV_Wind_FC_hourly
+
+def read_forecasts_quarter():
+
+    # Read Generation forecast
+    PV_Wind_FC = read_Wind_PV_data()
+
+
+
+    # Kopiere den ursprünglichen DataFrame
+    PV_Wind_FC_copy = PV_Wind_FC.copy()
+
+    # Extrahiere den Startzeitstempel aus der ersten Spalte
+    PV_Wind_FC_copy['timestamp_start'] = PV_Wind_FC_copy.iloc[:, 0].str.split(" - ").str[0]
+    PV_Wind_FC_copy['timestamp_start'] = pd.to_datetime(PV_Wind_FC_copy['timestamp_start'], format='%d.%m.%Y %H:%M')
+
+    # Lösche die ursprüngliche Zeitstempelspalte (erste Spalte)
+    PV_Wind_FC_copy.drop(columns=[PV_Wind_FC_copy.columns[0]], inplace=True)
+
+    # Behalte nur die erste Zeile jeder Stunde, indem die Index-Duplikate entfernt werden
+    PV_Wind_FC_copy = PV_Wind_FC_copy.set_index('timestamp_start')
+    #PV_Wind_FC_hourly = PV_Wind_FC_copy[~PV_Wind_FC_copy.index.floor('h').duplicated(keep='first')]
+    return PV_Wind_FC_copy
+
 
 
 def PV_WI_structure(PV_WIND_FC):
@@ -380,6 +404,20 @@ def merge_exaa(Df_PRC_1,Df_PRC_2):
     Df_Result = Df_Result[keep]
     return Df_Result
 
+def add_W_PV(Df_PRC_cont):
+    PV_WIND_FC = read_forecasts_quarter()
+    keep=["Generation - Solar [MW] Day Ahead/ BZN|DE-LU","Generation - Wind Offshore [MW] Day Ahead/ BZN|DE-LU","Generation - Wind Onshore [MW] Day Ahead/ BZN|DE-LU"]
+    PV_WIND_FC = PV_WIND_FC[keep]
+    PV_WIND_FC["MTU (CET/CEST)"] = PV_WIND_FC.index
+    Df_Result = Df_PRC_cont.merge(PV_WIND_FC, on="MTU (CET/CEST)", how="inner")
+    Df_Result = Df_Result.set_index("MTU (CET/CEST)")
+    """
+    Df_Result["PV"]=Df_Result["Generation - Solar [MW] Day Ahead/ BZN|DE-LU"]
+    
+    keep=["Date","Hour","Net Price","PV","Wind"]
+    Df_Result=Df_Result[keep]
+    """
+    return Df_Result
 
 def W_PV_cont(Df_PRC_cont):
 
@@ -484,3 +522,145 @@ def MLM(Df_PRC_cont):
     y_pred = model.predict(X_Data_filtered)
     
     return y_pred
+
+
+def merge_rebap(Df_PRC_1, reBAP_GER):
+    
+    Df_PRC_1["MTU (CET/CEST)"] = Df_PRC_1["MTU (CET/CEST)"].apply(lambda x: x[:19])
+
+
+    Df_PRC_1["MTU (CET/CEST)"] = pd.to_datetime(Df_PRC_1["MTU (CET/CEST)"], format="%d/%m/%Y %H:%M:%S", dayfirst=True)
+    reBAP_GER["MTU (CET/CEST)"] = pd.to_datetime(reBAP_GER['Datum'] + ' ' + reBAP_GER['von'], format='%d.%m.%Y %H:%M')
+
+    keep=["Day-ahead Price (EUR/MWh)", "MTU (CET/CEST)"]
+        
+    Df_PRC_1_new = Df_PRC_1[keep]
+        
+    keep=["reBAP unterdeckt", "MTU (CET/CEST)"]    
+    reBAP_GER = reBAP_GER[keep]
+       
+    Df_Result = reBAP_GER.merge(Df_PRC_1_new, on="MTU (CET/CEST)", how="inner")
+                           
+    Df_Result.index = Df_Result['MTU (CET/CEST)']
+    Df_Result = Df_Result.drop(columns='MTU (CET/CEST)')
+
+    Df_Result["Net Price"] = Df_Result["reBAP unterdeckt"] - Df_Result["Day-ahead Price (EUR/MWh)"]
+
+    return Df_Result
+
+def sim_model (start_date, end_date, Df_PRC_cont):
+    
+    
+    #ML based prediction model for net prices
+
+    #seasons
+    Df_PRC_cont["Weekday"] = Df_PRC_cont.index.dayofweek  # 0 = Montag, 6 = Sonntag
+    Df_PRC_cont["Month"] = Df_PRC_cont.index.month
+    Df_PRC_cont["Hour"] = Df_PRC_cont.index.hour+1
+    Df_PRC_cont["Season"] = Df_PRC_cont.index.month.map({12: "Winter", 1: "Winter", 2: "Winter",
+                                                         3: "Spring", 4: "Spring", 5: "Spring",
+                                                         6: "Summer", 7: "Summer", 8: "Summer",
+                                                         9: "Autumn", 10: "Autumn", 11: "Autumn"})
+    
+    #holidays
+    
+    from pandas.tseries.holiday import USFederalHolidayCalendar
+    cal = USFederalHolidayCalendar() #integrate sth more suitable
+    holidays = cal.holidays(start=Df_PRC_cont.index.min(), end=Df_PRC_cont.index.max())
+    hours = range(24)  # Stunden von 0 bis 23
+    holiday_hours = [pd.Timestamp(f"{date} {hour}:00:00") for date in holidays for hour in range(24)]
+    
+    Df_PRC_cont["Holiday"] = Df_PRC_cont.index.isin(holiday_hours).astype(int)
+    
+    
+    #normalize variables
+    #copy=Df_PRC_cont
+    
+    from sklearn.preprocessing import StandardScaler
+    scaler = StandardScaler()
+    Df_PRC_cont[["PV", "Wind OFFSH", "Wind ONSH"]] = scaler.fit_transform(Df_PRC_cont[["PV", "Wind OFFSH", "Wind ONSH"]])
+    
+    #dummies
+    
+    Df_PRC_cont = pd.get_dummies(Df_PRC_cont, columns=["Season", "Weekday"])
+    
+    Df_PRC_cont=Df_PRC_cont.rename(columns={"Weekday_0":"Monday","Weekday_1":"Tuesday","Weekday_2":"Wednesday","Weekday_3":"Thursday","Weekday_4":"Friday","Weekday_5":"Saturday","Weekday_6":"Sunday"})
+    
+    #Train-Test-Split
+    from sklearn.model_selection import train_test_split
+    #X = Df_PRC_cont.drop(columns=["Net Price"])
+    #y = Df_PRC_cont["Net Price"]
+    #X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    Df_PRC_cont_filtered = Df_PRC_cont[Df_PRC_cont.index <= "2025-01-01"].copy()
+
+    X = Df_PRC_cont_filtered.drop(columns=["Net Price"])
+    y = Df_PRC_cont_filtered["Net Price"]
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    
+    #Model training
+    from sklearn.ensemble import RandomForestRegressor
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+    
+
+
+    return model
+
+
+def sumup(model,start_date,end_date,Df_PRC_cont):
+    current_date = start_date
+    
+    Df_PRC_cont["Weekday"] = Df_PRC_cont.index.dayofweek  # 0 = Montag, 6 = Sonntag
+    Df_PRC_cont["Month"] = Df_PRC_cont.index.month
+    Df_PRC_cont["Hour"] = Df_PRC_cont.index.hour+1
+    Df_PRC_cont["Season"] = Df_PRC_cont.index.month.map({12: "Winter", 1: "Winter", 2: "Winter",
+                                                         3: "Spring", 4: "Spring", 5: "Spring",
+                                                         6: "Summer", 7: "Summer", 8: "Summer",
+                                                         9: "Autumn", 10: "Autumn", 11: "Autumn"})
+    
+    #holidays
+    
+    from pandas.tseries.holiday import USFederalHolidayCalendar
+    cal = USFederalHolidayCalendar() #integrate sth more suitable
+    holidays = cal.holidays(start=Df_PRC_cont.index.min(), end=Df_PRC_cont.index.max())
+    hours = range(24)  # Stunden von 0 bis 23
+    holiday_hours = [pd.Timestamp(f"{date} {hour}:00:00") for date in holidays for hour in range(24)]
+    
+    Df_PRC_cont["Holiday"] = Df_PRC_cont.index.isin(holiday_hours).astype(int)
+    
+    from sklearn.preprocessing import StandardScaler
+    scaler = StandardScaler()
+    Df_PRC_cont[["PV", "Wind OFFSH", "Wind ONSH"]] = scaler.fit_transform(Df_PRC_cont[["PV", "Wind OFFSH", "Wind ONSH"]])
+    
+        
+    #dummies
+    
+    Df_PRC_cont = pd.get_dummies(Df_PRC_cont, columns=["Season", "Weekday"])
+    
+    Df_PRC_cont=Df_PRC_cont.rename(columns={"Weekday_0":"Monday","Weekday_1":"Tuesday","Weekday_2":"Wednesday","Weekday_3":"Thursday","Weekday_4":"Friday","Weekday_5":"Saturday","Weekday_6":"Sunday"})
+    
+    
+ 
+    TradeD = pd.DataFrame(columns=["Signal"])
+    while current_date <= end_date:
+        print(current_date.strftime("%Y-%m-%d"))  # Ausgabe des Datums
+
+        X_Data = Df_PRC_cont[Df_PRC_cont.index.date == current_date.date()]
+        X_Data=X_Data.drop(columns=["Net Price"])
+        X_Data = X_Data.loc[:, ~X_Data.columns.str.contains('^Unnamed')]
+
+        y_pred = model.predict(X_Data)
+        #mai regime:
+        signals = np.where(y_pred > 0, 1, np.where(y_pred < 0, -1, 0))
+        #signals = np.where(y_pred > 0, 1, np.where(y_pred < 0, -1, 0))
+        timestamps = [current_date + timedelta(minutes=i * 15) for i in range(96)]
+        new_data = pd.DataFrame({"Timestamp": timestamps, "Signal": signals.flatten()})
+        TradeD = pd.concat([TradeD, new_data], ignore_index=True)
+
+        current_date += timedelta(days=1)
+        
+    return TradeD
+

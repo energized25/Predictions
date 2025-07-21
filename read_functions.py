@@ -34,6 +34,13 @@ dat_trad_day = morgen
 # Schleife durch den Bereich von A bis B
 #current_date = start_date
 
+
+#data sources:
+    #rebap: https://www.netztransparenz.de/de-de/Regelenergie/Ausgleichsenergiepreis/reBAP
+    #day ahead prices: Entsoe Newtransparency
+    #PV, Wind: Entsoe Newtransparency
+
+
 def read_X():
     
     
@@ -441,10 +448,11 @@ def imp_bal_prices(country):
 
 
     try:
-        df = pd.read_csv(file_path, delimiter=";")  # CSV-Datei einlesen
+        df = pd.read_csv(file_path, delimiter=";", decimal=",",na_values=['N.A.'],dtype={'reBaP unterdeckt': str}, low_memory=False )  # CSV-Datei einlesen
         if df.empty:
             print("The file is empty, no data to load.")
         #df["Year"] = year  # Füge eine Spalte mit der Jahreszahl hinzu
+
         df["Country"] = country  # Füge eine Spalte mit dem Land hinzu
         
     except pd.errors.EmptyDataError:
@@ -454,5 +462,62 @@ def imp_bal_prices(country):
     return df
 
 
+def imp_trade_prices_quarter(start_date, end_date, country, EXAA=False):
+    # Extrahiere die Jahreszahlen aus den übergebenen Datumswerten
+    import pandas as pd
+    import os
 
+    
+    start_year = start_date.year
+    end_year = end_date.year
+
+    data_frames = []
+
+    # Iteriere von der niedrigsten zur höchsten Jahreszahl
+    for year in range(start_year, end_year + 1):
+        folder_path = str(year)  # Der Ordnername entspricht der Jahreszahl
+        file_path = "DAT/PRC/"+ country+ "/"+ folder_path
+
+        if os.path.exists(file_path):        
+            for file_name in os.listdir(file_path):
+                if file_name.startswith("GUI") and file_name.endswith(".csv"):
+                    file_path = os.path.join(file_path, file_name)
+           
+            try:
+                df = pd.read_csv(file_path)  # CSV-Datei einlesen
+                if df.empty:
+                    print("The file is empty, no data to load.")
+                df["Year"] = year  # Füge eine Spalte mit der Jahreszahl hinzu
+                df["Country"] = country  # Füge eine Spalte mit dem Land hinzu
+                
+                if EXAA ==False:
+                    if country in ["DE", "AT"]: #hier wäre besser eine Bedingung die prüft ob es sequence 1 und 2 gibt
+                         df = df[(df['Sequence'] == 'Sequence 1')]
+                else:
+                    if EXAA == True:
+                        df = df[(df['Sequence'] == 'Sequence 2')]
+           
+                #if EXAA ==False:
+                #    df = transform_quarterly_to_hourly(df)
+                #else:
+                #    df = quarter_means(df)
+ 
+                data_frames.append(df)
+            except pd.errors.EmptyDataError:
+                print("Error: No columns to parse from the file. The file might be empty or misformatted.") 
+           
+    
+            #df = pd.read_csv(file_path)  # CSV-Datei einlesen
+            
+            
+           
+        else:
+            print(f"Datei nicht gefunden: {file_path}")
+
+    if data_frames:
+        final_df = pd.concat(data_frames, ignore_index=True)  # DataFrames vertikal zusammenfügen
+        return final_df
+    else:
+        print("Keine Daten gefunden.")
+        return None
 
