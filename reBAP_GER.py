@@ -82,6 +82,9 @@ signals = np.where(y_pred > 0, 1, np.where(y_pred < 0, -1, 0))
 
 
 """ Backlog - needed features:
+    
+- solve the problem with new time format!!!!!    
+    
 -We have a function creating an ML model and siumlating trading decisions day by day based on PV and Wind forecast data.
 -DONE - we NEED a function to import a specific forecast for the next day and to export the trading decision - DONE
 -Should the model be trained every run, or exported and saved for a couple of times?
