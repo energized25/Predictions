@@ -6,9 +6,11 @@ Created on Fri Jul 18 11:28:57 2025
 @author: sarahvonhardenberg
 """
 
-from read_functions import imp_bal_prices, imp_trade_prices_quarter, sumup, sim_model
+# This Block is to simulate potential gains for a given period
+
+from read_functions import imp_bal_prices, imp_trade_prices_quarter
 from parameters import get_startdate, get_enddate
-from functions import merge_rebap, add_W_PV
+from functions import merge_rebap, add_W_PV, sumup, sim_model
 
 import pandas as pd
 
@@ -36,9 +38,9 @@ Df_PRC_cont = Df_PRC_cont.rename(columns={
     "Generation - Wind Onshore [MW] Day Ahead/ BZN|DE-LU": "Wind ONSH"
 })
 
-model=sim_model(start_date, end_date, Df_PRC_cont)
+model, scaler =sim_model(start_date, end_date, Df_PRC_cont)
 
-TradeD=sumup(model,start_date,end_date,Df_PRC_cont)
+TradeD=sumup(model,start_date,end_date,Df_PRC_cont,scaler)
 TradeD.set_index("Timestamp", inplace=True)
 
 Df_PRC_cont=Df_PRC_cont.groupby(Df_PRC_cont.index).first()
@@ -48,19 +50,59 @@ TradeD["Result"] = TradeD["Net Price"] * TradeD["Signal"]*Q
 sum_result = TradeD["Result"].sum()
 print(sum_result)
 
+# %%
 
-""" Backlog - needed features
-We have a function creating an ML model and siumlating trading decisions day by day based on PV and Wind forecast data.
-We NEED a function to import a specific forecast for the next day and to export the trading decision
-Should the model be trained every run, or exported and saved for a couple of times?
-Check how far public API can be used at Entsoe
-Need a good data provider for forecasts day ahead (e.g. Energy Quantified - no account as of today)
+# This Block is to (after running previous block) determine trading decisions for day D+1
 
-Whole Scheduleing issue / clearing issue is unclear
+import numpy as np
+dateiname = "DAT/SUP/InputX_rebap.csv"
+daten2 = pd.DataFrame()
+    
+#try:
+        # Lese die CSV-Datei ein (ohne Überschriften)
+ #   if not os.path.exists(dateiname):
+  #      print("Failed reading "+dateiname+" - Exit")
+   #     sys.exit(1)
+daten2 = pd.read_csv(dateiname)
+daten2 = daten2.iloc[:, :-1]
+daten2.insert(4, "Hour", range(1, len(daten2) + 1))
+daten2["Hour"]=daten2["Hour"]/4
+daten2["Hour"]=np.ceil(daten2["Hour"])
+daten2[["PV", "Wind OFFSH", "Wind ONSH"]] = scaler.fit_transform(daten2[["PV", "Wind OFFSH", "Wind ONSH"]])
+
+    #except FileNotFoundError:
+    #                print(f"Die Datei {dateiname} wurde nicht gefunden.")
+    #except KeyError:
+     #           print("Die angegebenen Spalten konnten nicht gefunden werden.")
+
+
+y_pred = model.predict(daten2)
+signals = np.where(y_pred > 0, 1, np.where(y_pred < 0, -1, 0))
+
+
+
+""" Backlog - needed features:
+-We have a function creating an ML model and siumlating trading decisions day by day based on PV and Wind forecast data.
+-DONE - we NEED a function to import a specific forecast for the next day and to export the trading decision - DONE
+-Should the model be trained every run, or exported and saved for a couple of times?
+-Check how far public API can be used at Entsoe
+-Need a good data provider for forecasts day ahead (e.g. Energy Quantified - no account as of today)
+-Entsoe changed time format from CET/CEST to UTC (good, makes timeshift problem obsolete. But code still needs to be adapted.)
+-Many more variables need to be explored. (Demand side & Supply side)
+-Need a cockpit to visualize currant variables and trends
+
+-Need a live testing mode? Day by day decisions morning 9:00 with available data ? --> somehow possible by hand
+-Possible to extract "morning 9:00 data" for analysis?
+
+-useful/possible to find "risky" times --> impose Q=0? --> excel analysis outside code
+
+-Higher Q for values with stronger indication?
+
+-Whole Scheduleing issue / clearing issue is unclear
 --> AT --> web tool
---> DE --> also Web tool available? 
+--> DE --> also Web tool available? unclear, see e.g. https://www.transnetbw.de/en/energy-market/balancing-group-management/schedule-management#downloads-secure-communication
 
-We have no price predictions, only trading decisions (how to set limits? unlimited?)
+-We have no price predictions, only trading decisions (how to set limits? unlimited?)
 
 
 

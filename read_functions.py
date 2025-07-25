@@ -521,3 +521,4 @@ def imp_trade_prices_quarter(start_date, end_date, country, EXAA=False):
         print("Keine Daten gefunden.")
         return None
 
+

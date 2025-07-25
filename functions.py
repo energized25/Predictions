@@ -607,10 +607,10 @@ def sim_model (start_date, end_date, Df_PRC_cont):
     
 
 
-    return model
+    return model, scaler
 
 
-def sumup(model,start_date,end_date,Df_PRC_cont):
+def sumup(model,start_date,end_date,Df_PRC_cont,scaler):
     current_date = start_date
     
     Df_PRC_cont["Weekday"] = Df_PRC_cont.index.dayofweek  # 0 = Montag, 6 = Sonntag
@@ -632,7 +632,7 @@ def sumup(model,start_date,end_date,Df_PRC_cont):
     Df_PRC_cont["Holiday"] = Df_PRC_cont.index.isin(holiday_hours).astype(int)
     
     from sklearn.preprocessing import StandardScaler
-    scaler = StandardScaler()
+    #scaler = StandardScaler()
     Df_PRC_cont[["PV", "Wind OFFSH", "Wind ONSH"]] = scaler.fit_transform(Df_PRC_cont[["PV", "Wind OFFSH", "Wind ONSH"]])
     
         
