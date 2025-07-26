@@ -10,7 +10,7 @@ Created on Fri Jul 18 11:28:57 2025
 
 from read_functions import imp_bal_prices, imp_trade_prices_quarter
 from parameters import get_startdate, get_enddate
-from functions import merge_rebap, add_W_PV, sumup, sim_model
+from functions import merge_rebap, add_W_PV, sumup, sim_model, read_X_rebap,  imp_eq_df, signals_eq
 
 import pandas as pd
 
@@ -54,30 +54,196 @@ print(sum_result)
 
 # This Block is to (after running previous block) determine trading decisions for day D+1
 
-import numpy as np
-dateiname = "DAT/SUP/InputX_rebap.csv"
-daten2 = pd.DataFrame()
+signals = read_X_rebap(model, scaler)
+
+
+# %% import eq data
+
+
+
+
+
+# %%
+
+#import eq data
+
+df_predict =  imp_eq_df()
+df_predict["Weekday"] = df_predict.index.dayofweek  # 0 = Montag, 6 = Sonntag
+df_predict["Month"] = df_predict.index.month
+df_predict["Hour"] = df_predict.index.hour+1
+df_predict["Season"] = df_predict.index.month.map({12: "Winter", 1: "Winter", 2: "Winter",
+                                                     3: "Spring", 4: "Spring", 5: "Spring",
+                                                     6: "Summer", 7: "Summer", 8: "Summer",
+                                                     9: "Autumn", 10: "Autumn", 11: "Autumn"})
+
+#holidays
+
+from pandas.tseries.holiday import USFederalHolidayCalendar
+cal = USFederalHolidayCalendar() #integrate sth more suitable
+holidays = cal.holidays(start=df_predict.index.min(), end=df_predict.index.max())
+hours = range(24)  # Stunden von 0 bis 23
+holiday_hours = [pd.Timestamp(f"{date} {hour}:00:00") for date in holidays for hour in range(24)]
+
+df_predict["Holiday"] = df_predict.index.isin(holiday_hours).astype(int)
+
+
+#normalize variables
+#copy=Df_PRC_cont
+
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+df_predict[["PV", "Wind OFFSH", "Wind ONSH"]] = scaler.fit_transform(df_predict[["PV", "Wind OFFSH", "Wind ONSH"]])
+
+
+df_predict = pd.get_dummies(df_predict, columns=["Season", "Weekday"])
     
-#try:
-        # Lese die CSV-Datei ein (ohne Überschriften)
- #   if not os.path.exists(dateiname):
-  #      print("Failed reading "+dateiname+" - Exit")
-   #     sys.exit(1)
-daten2 = pd.read_csv(dateiname)
-daten2 = daten2.iloc[:, :-1]
-daten2.insert(4, "Hour", range(1, len(daten2) + 1))
-daten2["Hour"]=daten2["Hour"]/4
-daten2["Hour"]=np.ceil(daten2["Hour"])
-daten2[["PV", "Wind OFFSH", "Wind ONSH"]] = scaler.fit_transform(daten2[["PV", "Wind OFFSH", "Wind ONSH"]])
+df_predict=df_predict.rename(columns={"Weekday_0":"Monday","Weekday_1":"Tuesday","Weekday_2":"Wednesday","Weekday_3":"Thursday","Weekday_4":"Friday","Weekday_5":"Saturday","Weekday_6":"Sunday"})
+        
 
-    #except FileNotFoundError:
-    #                print(f"Die Datei {dateiname} wurde nicht gefunden.")
-    #except KeyError:
-     #           print("Die angegebenen Spalten konnten nicht gefunden werden.")
+# Alle gewünschten Spalten in der richtigen Reihenfolge
+season_cols = ["Season_Autumn", "Season_Spring", "Season_Summer", "Season_Winter"]
+weekday_cols = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+all_cols = season_cols + weekday_cols
+
+# Fehlende Spalten mit False ergänzen
+for col in all_cols:
+    if col not in df_predict.columns:
+        df_predict[col] = False
+neworder=df_predict.columns[:6].tolist()+all_cols        
+df_predict = df_predict[neworder]
+        
+#sauberer modellaufbau: weiterhin mit offset zeitangabe im 15 min format arbeiten
+#prediction matrix erstellen (gibt es schon die funktion?)
+#modell training gemäss bestehender funktion
+#predict mit neuer matrix
+#wow
 
 
-y_pred = model.predict(daten2)
-signals = np.where(y_pred > 0, 1, np.where(y_pred < 0, -1, 0))
+signals = signals_eq(model, scaler, df_predict)
+
+# %%
+
+# This block is a test for the wheather api
+
+
+import requests
+
+# API-URL wie angegeben
+url = "https://my.meteoblue.com/packages/basic-15min?apikey=DEXxF4mzLBWpwUQ5&lat=47.3667&lon=8.55&asl=429&format=json"
+
+# Anfrage senden
+response = requests.get(url)
+
+# Antwort prüfen und verarbeiten
+if response.status_code == 200 and response.text:
+    try:
+        data = response.json()
+        # Beispielausgabe: Solarpower-Daten durchsuchen
+        solar_data = data.get('data_15min', [])
+        for entry in solar_data:
+            timestamp = entry.get('time')
+            pvpower = entry.get('solar', {}).get('pv_power', 'Kein Wert')  # Beispielkey
+            print(f"{timestamp}: {pvpower} W")
+    except Exception as e:
+        print(f"Fehler beim Parsen: {e}")
+else:
+    print(f"Fehlerhafte Antwort. Status Code: {response.status_code}")
+    print(f"Antwortinhalt: {response.text[:300]}...")
+
+
+
+basic = data.get('data_1h', [])
+
+# %%
+# this block is to test the energy quantified api
+
+#EQ api key: cfe9021a-60ddbf36-c1f55613-b0a0fe22
+
+
+import requests
+from datetime import datetime, timedelta
+
+# Dein API-Key
+API_KEY = "cfe9021a-60ddbf36-c1f55613-b0a0fe22"
+
+# Datum für morgen
+tomorrow = datetime.utcnow().date() + timedelta(days=1)
+date_str = tomorrow.strftime("%Y-%m-%d")
+
+# API-URL für PV-Production (Deutschland, Viertelstunde)
+url = f"https://gateway.energyquantified.com/data?series=DE.SOLAR.production&resolution=15m&from={date_str}T00:00Z&to={date_str}T23:45Z"
+
+# Header mit Authentifizierung
+headers = {
+    "Authorization": f"Bearer {API_KEY}"
+}
+
+# Request senden
+response = requests.get(url, headers=headers)
+
+# Daten prüfen und verarbeiten
+if response.status_code == 200:
+    data = response.json()
+    for point in data["points"]:
+        timestamp = point["timestamp"]
+        value = point["value"]
+        print(f"{timestamp}: {value} MW")
+else:
+    print("Fehler:", response.status_code, response.text)
+
+
+#%% 2nd try WOW WOW WOW
+#import energyquantified
+from datetime import date, timedelta
+from energyquantified import EnergyQuantified
+
+# Initialize client
+eq = EnergyQuantified(api_key='cfe9021a-60ddbf36-c1f55613-b0a0fe22')
+
+# Freetext search (filtering on attributes is also supported)
+#curves = eq.metadata.curves(q='DE solar Power Production MWh/h 15min Forecast')
+
+#for curve in curves:
+#    print(curve.name)
+
+forecast = eq.instances.latest(
+   'DE Wind Power Production Offshore MWh/h 15min Forecast'
+)
+
+
+# Convert to Pandas data frame
+df_offshore = forecast.to_pandas_dataframe()
+
+forecast = eq.instances.latest(
+   'DE Wind Power Production Onshore MWh/h 15min Forecast'
+)
+
+df_onshore = forecast.to_pandas_dataframe()
+
+forecast = eq.instances.latest(
+   'DE Solar Photovoltaic Production MWh/h 15min Forecast'
+)
+
+df_pv = forecast.to_pandas_dataframe()
+
+
+
+import pandas as pd
+from datetime import datetime, timedelta
+
+nextday = (datetime.now() + timedelta(days=1)).date()
+
+
+df_pv_d1 = df_pv[df_pv.index.date == nextday]
+df_onshore_d1 = df_onshore[df_onshore.index.date == nextday]
+df_offshore_d1 = df_offshore[df_offshore.index.date == nextday]
+
+df_neu = pd.DataFrame(index=df_pv_d1.index)
+
+# Schritt 3: Werte von df1, df2, df3 übernehmen
+df_neu["PV"] = df_pv_d1.values
+df_neu["Wind OFFSH"] = df_offshore_d1.values
+df_neu["Wind ONSH"] = df_onshore_d1.values
 
 
 

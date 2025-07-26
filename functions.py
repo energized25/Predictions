@@ -12,6 +12,8 @@ import numpy as np
 import pytz
 from datetime import datetime, timedelta
 from parameters import get_season_filter_settings
+from energyquantified import EnergyQuantified
+
 
 def merge_dfs(Df_PRC_1,Df_PRC_2,Df_Jao_out):
 
@@ -664,3 +666,71 @@ def sumup(model,start_date,end_date,Df_PRC_cont,scaler):
         
     return TradeD
 
+
+def read_X_rebap(model, scaler):
+
+    dateiname = "DAT/SUP/InputX_rebap.csv"
+    daten2 = pd.DataFrame()
+    
+    try:
+        daten2 = pd.read_csv(dateiname)
+        daten2 = daten2.iloc[:, :-1]
+        daten2.insert(4, "Hour", range(1, len(daten2) + 1))
+        daten2["Hour"]=daten2["Hour"]/4
+        daten2["Hour"]=np.ceil(daten2["Hour"])
+        daten2[["PV", "Wind OFFSH", "Wind ONSH"]] = scaler.fit_transform(daten2[["PV", "Wind OFFSH", "Wind ONSH"]])
+
+    except FileNotFoundError:
+        print(f"Die Datei {dateiname} wurde nicht gefunden.")
+    except KeyError:
+        print("Die angegebenen Spalten konnten nicht gefunden werden.")
+
+
+    y_pred = model.predict(daten2)
+    signals = np.where(y_pred > 0, 1, np.where(y_pred < 0, -1, 0))
+
+    return signals
+
+def signals_eq(model, scaler, df_X):
+
+    df_X[["PV", "Wind OFFSH", "Wind ONSH"]] = scaler.fit_transform(df_X[["PV", "Wind OFFSH", "Wind ONSH"]])
+    y_pred = model.predict(df_X)
+    signals = np.where(y_pred > 0, 1, np.where(y_pred < 0, -1, 0))
+
+    return signals
+
+def imp_eq_df ():
+    
+    eq = EnergyQuantified(api_key='cfe9021a-60ddbf36-c1f55613-b0a0fe22')
+
+    forecast = eq.instances.latest(
+        'DE Wind Power Production Offshore MWh/h 15min Forecast'
+        )
+    
+    df_offshore = forecast.to_pandas_dataframe()
+    
+    forecast = eq.instances.latest(
+        'DE Wind Power Production Onshore MWh/h 15min Forecast'
+        )
+    
+    df_onshore = forecast.to_pandas_dataframe()
+    
+    forecast = eq.instances.latest(
+        'DE Solar Photovoltaic Production MWh/h 15min Forecast'
+        )
+        
+    df_pv = forecast.to_pandas_dataframe()
+    
+    nextday = (datetime.now() + timedelta(days=1)).date()
+    
+    df_pv_d1 = df_pv[df_pv.index.date == nextday]
+    df_onshore_d1 = df_onshore[df_onshore.index.date == nextday]
+    df_offshore_d1 = df_offshore[df_offshore.index.date == nextday]
+    
+    df_new = pd.DataFrame(index=df_pv_d1.index)
+    
+    df_new["PV"] = df_pv_d1.values
+    df_new["Wind OFFSH"] = df_offshore_d1.values
+    df_new["Wind ONSH"] = df_onshore_d1.values
+
+    return df_new
