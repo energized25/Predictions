@@ -11,7 +11,7 @@ Created on Fri Jul 18 11:28:57 2025
 from read_functions import imp_bal_prices, imp_trade_prices_quarter
 from parameters import get_startdate, get_enddate
 from functions import merge_rebap, add_W_PV, sumup, sim_model, read_X_rebap,  imp_eq_df, signals_eq
-
+import joblib
 import pandas as pd
 
 Country ="DE"
@@ -40,6 +40,15 @@ Df_PRC_cont = Df_PRC_cont.rename(columns={
 
 model, scaler =sim_model(start_date, end_date, Df_PRC_cont)
 
+joblib.dump(model, 'logistic_model.pkl')
+joblib.dump(scaler, 'scaler.pkl')
+
+# %%
+
+
+model = joblib.load('logistic_model.pkl')
+scaler = joblib.load('scaler.pkl')
+
 TradeD=sumup(model,start_date,end_date,Df_PRC_cont,scaler)
 TradeD.set_index("Timestamp", inplace=True)
 
@@ -49,6 +58,8 @@ TradeD["Net Price"] = TradeD.index.map(Df_PRC_cont["Net Price"])
 TradeD["Result"] = TradeD["Net Price"] * TradeD["Signal"]*Q
 sum_result = TradeD["Result"].sum()
 print(sum_result)
+
+
 
 # %%
 
@@ -120,6 +131,21 @@ df_predict = df_predict[neworder]
 
 
 signals = signals_eq(model, scaler, df_predict)
+signals = pd.DataFrame(signals, index=df_predict.index)
+
+import pandas as pd
+from datetime import datetime, timedelta
+
+morgen = datetime.now() + timedelta(days=1)
+datum_str = morgen.strftime('%Y-%m-%d')  # Format: '2025-07-31'
+
+# Dateinamen erstellen
+dateiname = f'{datum_str}_signals.csv'
+
+# Speichern
+signals.to_csv(dateiname, index=True)
+
+
 
 # %%
 
@@ -249,7 +275,7 @@ df_neu["Wind ONSH"] = df_onshore_d1.values
 
 """ Backlog - needed features:
     
-- solve the problem with new time format!!!!!    
+- solve the problem concerning new time format!!!!!    
     
 -We have a function creating an ML model and siumlating trading decisions day by day based on PV and Wind forecast data.
 -DONE - we NEED a function to import a specific forecast for the next day and to export the trading decision - DONE
@@ -271,9 +297,9 @@ df_neu["Wind ONSH"] = df_onshore_d1.values
 --> AT --> web tool
 --> DE --> also Web tool available? unclear, see e.g. https://www.transnetbw.de/en/energy-market/balancing-group-management/schedule-management#downloads-secure-communication
 
--We have no price predictions, only trading decisions (how to set limits? unlimited?)
+-We have no price predictions, only trading decisions (how to set limits? unlimited?) -->> but now we can use the EQ price prediction easyly
 
-
+end of functions: draft for an EQ function to get the 5 latest estimates - choose the right ones and use them (or mix weighted)
 
 
 """

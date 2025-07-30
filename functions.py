@@ -708,7 +708,7 @@ def imp_eq_df ():
         )
     
     df_offshore = forecast.to_pandas_dataframe()
-    
+
     forecast = eq.instances.latest(
         'DE Wind Power Production Onshore MWh/h 15min Forecast'
         )
@@ -733,4 +733,35 @@ def imp_eq_df ():
     df_new["Wind OFFSH"] = df_offshore_d1.values
     df_new["Wind ONSH"] = df_onshore_d1.values
 
+
+
+
     return df_new
+
+
+
+"""
+#code for getting list of last instances
+
+forecasts = eq.instances.load(
+   'DE Wind Power Production Onshore MWh/h 15min Forecast',
+   issued_at_latest=datetime.today().replace(hour=10, minute=0, second=0, microsecond=0)
+)
+
+df_list_ONSH=forecasts.to_pandas_dataframe()
+
+forecasts = eq.instances.load(
+   'DE Wind Power Production Offshore MWh/h 15min Forecast',
+   issued_at_latest=datetime.today().replace(hour=10, minute=0, second=0, microsecond=0)
+)
+
+df_list_OFFSH=forecasts.to_pandas_dataframe()
+
+forecasts = eq.instances.load(
+   'DE Solar Photovoltaic Production MWh/h 15min Forecast',
+   issued_at_latest=datetime.today().replace(hour=10, minute=0, second=0, microsecond=0)
+)
+
+df_list_PV=forecasts.to_pandas_dataframe()
+
+"""
